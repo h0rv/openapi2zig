@@ -1,6 +1,5 @@
 const std = @import("std");
 const version_info = @import("build_info");
-const input_loader = @import("input_loader.zig");
 
 pub const CliArgs = struct {
     input_path: []const u8,
@@ -10,21 +9,16 @@ pub const CliArgs = struct {
 
 pub const ParsedArgs = struct {
     args: CliArgs,
-    raw: [][:0]u8,
 };
 
-pub fn parse(allocator: std.mem.Allocator) !ParsedArgs {
-    const args = try std.process.argsAlloc(allocator);
-
+pub fn parse(args: []const [:0]const u8) !ParsedArgs {
     if (args.len < 4) {
-        std.process.argsFree(allocator, args[0..]);
         printUsage();
         std.debug.print("\nError: OpenAPI spec path or URL required\n", .{});
         return error.InvalidArguments;
     }
 
     if (!std.mem.eql(u8, args[1], "generate")) {
-        std.process.argsFree(allocator, args[0..]);
         printUsage();
         return error.InvalidArguments;
     }
@@ -40,7 +34,6 @@ pub fn parse(allocator: std.mem.Allocator) !ParsedArgs {
         if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--input")) {
             i += 1;
             if (i >= args.len) {
-                std.process.argsFree(allocator, args[0..]);
                 printUsage();
                 std.debug.print("\nError: OpenAPI spec path or URL required\n", .{});
                 return error.InvalidArguments;
@@ -49,7 +42,6 @@ pub fn parse(allocator: std.mem.Allocator) !ParsedArgs {
         } else if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output")) {
             i += 1;
             if (i >= args.len) {
-                std.process.argsFree(allocator, args[0..]);
                 printUsage();
                 return error.InvalidArguments;
             }
@@ -57,7 +49,6 @@ pub fn parse(allocator: std.mem.Allocator) !ParsedArgs {
         } else if (std.mem.eql(u8, arg, "--base-url")) {
             i += 1;
             if (i >= args.len) {
-                std.process.argsFree(allocator, args[0..]);
                 printUsage();
                 return error.InvalidArguments;
             }
@@ -66,19 +57,17 @@ pub fn parse(allocator: std.mem.Allocator) !ParsedArgs {
     }
 
     if (input_path == null) {
-        std.process.argsFree(allocator, args[0..]);
         printUsage();
         std.debug.print("\nError: OpenAPI spec path or URL required\n", .{});
         return error.InvalidArguments;
     }
 
-    return ParsedArgs{
-        .args = CliArgs{
+    return .{
+        .args = .{
             .input_path = input_path.?,
             .output_path = output_path,
             .base_url = base_url,
         },
-        .raw = args,
     };
 }
 

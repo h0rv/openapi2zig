@@ -49,7 +49,6 @@ pub const ApiResponse = struct {
     code: ?i64 = null,
 };
 
-
 ///////////////////////////////////////////
 // Generated Zig API client from OpenAPI
 ///////////////////////////////////////////
@@ -61,8 +60,8 @@ pub const ApiResponse = struct {
 // Description:
 // Returns a map of status codes to quantities
 //
-pub fn getInventory(allocator: std.mem.Allocator) !std.json.Value {
-    var client = std.http.Client { .allocator = allocator };
+pub fn getInventory(allocator: std.mem.Allocator, io: std.Io) !std.json.Value {
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     const headers = &[_]std.http.Header{
@@ -97,10 +96,10 @@ pub fn getInventory(allocator: std.mem.Allocator) !std.json.Value {
 // Get user by user name
 //
 // Description:
-// 
 //
-pub fn getUserByName(allocator: std.mem.Allocator, username: []const u8) !User {
-    var client = std.http.Client { .allocator = allocator };
+//
+pub fn getUserByName(allocator: std.mem.Allocator, io: std.Io, username: []const u8) !User {
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     const headers = &[_]std.http.Header{
@@ -139,8 +138,8 @@ pub fn getUserByName(allocator: std.mem.Allocator, username: []const u8) !User {
 // Description:
 // Place a new order in the store
 //
-pub fn placeOrder(allocator: std.mem.Allocator, requestBody: Order) !void {
-    var client = std.http.Client { .allocator = allocator };
+pub fn placeOrder(allocator: std.mem.Allocator, io: std.Io, requestBody: Order) !void {
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     const headers = &[_]std.http.Header{
@@ -154,15 +153,14 @@ pub fn placeOrder(allocator: std.mem.Allocator, requestBody: Order) !void {
     var req = try client.request(std.http.Method.POST, uri, .{ .extra_headers = headers });
     defer req.deinit();
 
-    var str = std.ArrayList(u8){};
-    defer str.deinit(allocator);
+    var str: std.Io.Writer.Allocating = .init(allocator);
+    defer str.deinit();
 
-    try std.json.stringify(requestBody, .{}, str.writer());
-    const payload = str.items;
+    try std.json.Stringify.value(requestBody, .{}, &str.writer);
+    const payload = str.written();
 
     req.transfer_encoding = .{ .content_length = payload.len };
     try req.sendBodyComplete(payload);
-
 }
 
 /////////////////
@@ -172,8 +170,8 @@ pub fn placeOrder(allocator: std.mem.Allocator, requestBody: Order) !void {
 // Description:
 // This can only be done by the logged in user.
 //
-pub fn createUser(allocator: std.mem.Allocator, requestBody: User) !void {
-    var client = std.http.Client { .allocator = allocator };
+pub fn createUser(allocator: std.mem.Allocator, io: std.Io, requestBody: User) !void {
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     const headers = &[_]std.http.Header{
@@ -187,15 +185,14 @@ pub fn createUser(allocator: std.mem.Allocator, requestBody: User) !void {
     var req = try client.request(std.http.Method.POST, uri, .{ .extra_headers = headers });
     defer req.deinit();
 
-    var str = std.ArrayList(u8){};
-    defer str.deinit(allocator);
+    var str: std.Io.Writer.Allocating = .init(allocator);
+    defer str.deinit();
 
-    try std.json.stringify(requestBody, .{}, str.writer());
-    const payload = str.items;
+    try std.json.Stringify.value(requestBody, .{}, &str.writer);
+    const payload = str.written();
 
     req.transfer_encoding = .{ .content_length = payload.len };
     try req.sendBodyComplete(payload);
-
 }
 
 /////////////////
@@ -205,8 +202,8 @@ pub fn createUser(allocator: std.mem.Allocator, requestBody: User) !void {
 // Description:
 // Returns a single pet
 //
-pub fn getPetById(allocator: std.mem.Allocator, petId: []const u8) !Pet {
-    var client = std.http.Client { .allocator = allocator };
+pub fn getPetById(allocator: std.mem.Allocator, io: std.Io, petId: []const u8) !Pet {
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     const headers = &[_]std.http.Header{
@@ -243,11 +240,11 @@ pub fn getPetById(allocator: std.mem.Allocator, petId: []const u8) !Pet {
 // Deletes a pet
 //
 // Description:
-// 
 //
-pub fn deletePet(allocator: std.mem.Allocator, api_key: []const u8, petId: []const u8) !void {
+//
+pub fn deletePet(allocator: std.mem.Allocator, io: std.Io, api_key: []const u8, petId: []const u8) !void {
     _ = api_key;
-    var client = std.http.Client { .allocator = allocator };
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     const headers = &[_]std.http.Header{
@@ -255,7 +252,9 @@ pub fn deletePet(allocator: std.mem.Allocator, api_key: []const u8, petId: []con
         .{ .name = "Accept", .value = "application/json" },
     };
 
-    const uri_str = try std.fmt.allocPrint(allocator, "https://petstore3.swagger.io/api/v3/pet/{s}", .{petId, });
+    const uri_str = try std.fmt.allocPrint(allocator, "https://petstore3.swagger.io/api/v3/pet/{s}", .{
+        petId,
+    });
     defer allocator.free(uri_str);
     const uri = try std.Uri.parse(uri_str);
     var req = try client.request(std.http.Method.DELETE, uri, .{ .extra_headers = headers });
@@ -271,8 +270,8 @@ pub fn deletePet(allocator: std.mem.Allocator, api_key: []const u8, petId: []con
 // Description:
 // Add a new pet to the store
 //
-pub fn addPet(allocator: std.mem.Allocator, requestBody: Pet) !void {
-    var client = std.http.Client { .allocator = allocator };
+pub fn addPet(allocator: std.mem.Allocator, io: std.Io, requestBody: Pet) !void {
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     const headers = &[_]std.http.Header{
@@ -286,15 +285,14 @@ pub fn addPet(allocator: std.mem.Allocator, requestBody: Pet) !void {
     var req = try client.request(std.http.Method.POST, uri, .{ .extra_headers = headers });
     defer req.deinit();
 
-    var str = std.ArrayList(u8){};
-    defer str.deinit(allocator);
+    var str: std.Io.Writer.Allocating = .init(allocator);
+    defer str.deinit();
 
-    try std.json.stringify(requestBody, .{}, str.writer());
-    const payload = str.items;
+    try std.json.Stringify.value(requestBody, .{}, &str.writer);
+    const payload = str.written();
 
     req.transfer_encoding = .{ .content_length = payload.len };
     try req.sendBodyComplete(payload);
-
 }
 
 /////////////////
@@ -304,8 +302,8 @@ pub fn addPet(allocator: std.mem.Allocator, requestBody: Pet) !void {
 // Description:
 // Update an existing pet by Id
 //
-pub fn updatePet(allocator: std.mem.Allocator, requestBody: Pet) !void {
-    var client = std.http.Client { .allocator = allocator };
+pub fn updatePet(allocator: std.mem.Allocator, io: std.Io, requestBody: Pet) !void {
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     const headers = &[_]std.http.Header{
@@ -319,15 +317,14 @@ pub fn updatePet(allocator: std.mem.Allocator, requestBody: Pet) !void {
     var req = try client.request(std.http.Method.PUT, uri, .{ .extra_headers = headers });
     defer req.deinit();
 
-    var str = std.ArrayList(u8){};
-    defer str.deinit(allocator);
+    var str: std.Io.Writer.Allocating = .init(allocator);
+    defer str.deinit();
 
-    try std.json.stringify(requestBody, .{}, str.writer());
-    const payload = str.items;
+    try std.json.Stringify.value(requestBody, .{}, &str.writer);
+    const payload = str.written();
 
     req.transfer_encoding = .{ .content_length = payload.len };
     try req.sendBodyComplete(payload);
-
 }
 
 /////////////////
@@ -337,9 +334,9 @@ pub fn updatePet(allocator: std.mem.Allocator, requestBody: Pet) !void {
 // Description:
 // Multiple status values can be provided with comma separated strings
 //
-pub fn findPetsByStatus(allocator: std.mem.Allocator, status: []const u8) ![]const u8 {
+pub fn findPetsByStatus(allocator: std.mem.Allocator, io: std.Io, status: []const u8) ![]const u8 {
     _ = status;
-    var client = std.http.Client { .allocator = allocator };
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     const headers = &[_]std.http.Header{
@@ -370,4 +367,3 @@ pub fn findPetsByStatus(allocator: std.mem.Allocator, status: []const u8) ![]con
 
     return parsed.value;
 }
-

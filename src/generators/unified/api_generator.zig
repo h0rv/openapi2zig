@@ -2,11 +2,41 @@ const std = @import("std");
 const cli = @import("../../cli.zig");
 const UnifiedDocument = @import("../../models/common/document.zig").UnifiedDocument;
 const Operation = @import("../../models/common/document.zig").Operation;
-const Parameter = @import("../../models/common/document.zig").Parameter;
-const ParameterLocation = @import("../../models/common/document.zig").ParameterLocation;
-const Response = @import("../../models/common/document.zig").Response;
 const Schema = @import("../../models/common/document.zig").Schema;
 const SchemaType = @import("../../models/common/document.zig").SchemaType;
+
+fn isIdentStart(c: u8) bool {
+    return std.ascii.isAlphabetic(c) or c == '_';
+}
+
+fn isIdentContinue(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '_';
+}
+
+fn isReservedIdent(name: []const u8) bool {
+    const reserved = [_][]const u8{
+        "addrspace", "align",    "allowzero", "and",       "anyerror", "anyframe",    "anyopaque", "anytype",
+        "asm",       "async",    "await",     "bool",      "break",    "callconv",    "catch",     "comptime",
+        "const",     "continue", "defer",     "else",      "enum",     "errdefer",    "error",     "export",
+        "extern",    "false",    "fn",        "for",       "if",       "inline",      "isize",     "linksection",
+        "noalias",   "noreturn", "nosuspend", "null",      "opaque",   "or",          "orelse",    "packed",
+        "pub",       "resume",   "return",    "struct",    "suspend",  "switch",      "test",      "threadlocal",
+        "true",      "try",      "type",      "undefined", "union",    "unreachable", "usize",     "usingnamespace",
+        "var",       "void",     "volatile",  "while",
+    };
+    for (reserved) |word| {
+        if (std.mem.eql(u8, name, word)) return true;
+    }
+    return false;
+}
+
+fn isBareIdentifier(name: []const u8) bool {
+    if (name.len == 0 or !isIdentStart(name[0]) or isReservedIdent(name)) return false;
+    for (name[1..]) |c| {
+        if (!isIdentContinue(c)) return false;
+    }
+    return true;
+}
 
 pub const UnifiedApiGenerator = struct {
     allocator: std.mem.Allocator,
@@ -30,6 +60,37 @@ pub const UnifiedApiGenerator = struct {
         try self.generateHeader();
         try self.generateApiClient(document);
         return try self.allocator.dupe(u8, self.buffer.items);
+    }
+
+    fn appendIdentifier(self: *UnifiedApiGenerator, name: []const u8) !void {
+        if (isBareIdentifier(name)) {
+            try self.buffer.appendSlice(self.allocator, name);
+            return;
+        }
+
+        try self.buffer.appendSlice(self.allocator, "@\"");
+        for (name) |c| {
+            switch (c) {
+                '\\', '"' => {
+                    try self.buffer.append(self.allocator, '\\');
+                    try self.buffer.append(self.allocator, c);
+                },
+                '\n' => try self.buffer.appendSlice(self.allocator, "\\n"),
+                '\r' => try self.buffer.appendSlice(self.allocator, "\\r"),
+                '\t' => try self.buffer.appendSlice(self.allocator, "\\t"),
+                else => try self.buffer.append(self.allocator, c),
+            }
+        }
+        try self.buffer.appendSlice(self.allocator, "\"");
+    }
+
+    fn appendLineComment(self: *UnifiedApiGenerator, text: []const u8) !void {
+        var lines = std.mem.splitScalar(u8, text, '\n');
+        while (lines.next()) |line| {
+            try self.buffer.appendSlice(self.allocator, "// ");
+            try self.buffer.appendSlice(self.allocator, std.mem.trim(u8, line, "\r"));
+            try self.buffer.appendSlice(self.allocator, "\n");
+        }
     }
 
     fn generateHeader(self: *UnifiedApiGenerator) !void {
@@ -59,7 +120,7 @@ pub const UnifiedApiGenerator = struct {
 
     fn generateOperation(self: *UnifiedApiGenerator, method: []const u8, path: []const u8, operation: Operation) !void {
         try self.generateComments(operation);
-        try self.generateFunctionSignature(method, path, operation);
+        try self.generateFunctionSignature(path, operation);
         try self.generateFunctionBody(method, path, operation);
     }
 
@@ -67,97 +128,58 @@ pub const UnifiedApiGenerator = struct {
         if (operation.summary) |summary| {
             try self.buffer.appendSlice(self.allocator, "/////////////////\n");
             try self.buffer.appendSlice(self.allocator, "// Summary:\n");
-            try self.buffer.appendSlice(self.allocator, "// ");
-            try self.buffer.appendSlice(self.allocator, summary);
-            try self.buffer.appendSlice(self.allocator, "\n");
+            try self.appendLineComment(summary);
             try self.buffer.appendSlice(self.allocator, "//\n");
         }
 
         if (operation.description) |description| {
             try self.buffer.appendSlice(self.allocator, "// Description:\n");
-            try self.buffer.appendSlice(self.allocator, "// ");
-            try self.buffer.appendSlice(self.allocator, description);
-            try self.buffer.appendSlice(self.allocator, "\n");
+            try self.appendLineComment(description);
             try self.buffer.appendSlice(self.allocator, "//\n");
         }
     }
 
-    fn generateFunctionSignature(self: *UnifiedApiGenerator, method: []const u8, path: []const u8, operation: Operation) !void {
+    fn generateFunctionSignature(self: *UnifiedApiGenerator, path: []const u8, operation: Operation) !void {
         try self.buffer.appendSlice(self.allocator, "pub fn ");
 
         if (operation.operationId) |op_id| {
-            try self.buffer.appendSlice(self.allocator, op_id);
+            try self.appendIdentifier(op_id);
         } else {
-            try self.buffer.appendSlice(self.allocator, "operation");
-            try self.buffer.appendSlice(self.allocator, path[1..]); // Remove leading slash
+            try self.buffer.appendSlice(self.allocator, "@\"operation");
+            try self.buffer.appendSlice(self.allocator, path[1..]);
+            try self.buffer.appendSlice(self.allocator, "\"");
         }
         try self.buffer.appendSlice(self.allocator, "(allocator: std.mem.Allocator, io: std.Io");
-        var has_body_param = false;
-        var path_parameters = std.ArrayList([]const u8).empty;
-        defer path_parameters.deinit(self.allocator);
         if (operation.parameters) |params| {
-            if (params.len > 0) try self.buffer.appendSlice(self.allocator, ", ");
-            var first = true;
             for (params) |param| {
-                if (!first) try self.buffer.appendSlice(self.allocator, ", ");
-                first = false;
-                var data_type: []const u8 = "[]const u8"; // Default to string
-                var name: []const u8 = param.name;
-                if (param.location == .body) {
-                    has_body_param = true;
-                    name = "requestBody";
-                    if (param.schema) |schema| {
-                        if (schema.ref) |ref| {
-                            if (std.mem.lastIndexOf(u8, ref, "/")) |last_slash| {
-                                data_type = ref[last_slash + 1 ..];
-                            }
-                        } else {
-                            data_type = self.getZigTypeFromSchema(schema);
-                        }
-                    }
-                } else if (param.location == .path) {
-                    try path_parameters.append(self.allocator, param.name);
-                    if (param.type) |param_type| {
-                        data_type = self.getZigTypeFromSchemaType(param_type);
-                    }
-                } else {
-                    if (param.type) |param_type| {
-                        data_type = self.getZigTypeFromSchemaType(param_type);
-                    }
-                }
-                try self.buffer.appendSlice(self.allocator, name);
+                try self.buffer.appendSlice(self.allocator, ", ");
+                const name: []const u8 = if (param.location == .body) "requestBody" else param.name;
+                try self.appendIdentifier(name);
                 try self.buffer.appendSlice(self.allocator, ": ");
-                try self.buffer.appendSlice(self.allocator, data_type);
-            }
-        }
-
-        const return_type = self.getReturnType(method, operation);
-        try self.buffer.appendSlice(self.allocator, ") !");
-        try self.buffer.appendSlice(self.allocator, return_type);
-        try self.buffer.appendSlice(self.allocator, " {\n");
-    }
-
-    fn getReturnType(self: *UnifiedApiGenerator, method: []const u8, operation: Operation) []const u8 {
-        if (std.mem.eql(u8, method, "GET")) {
-            if (operation.responses.get("200")) |path_item| {
-                if (path_item.schema) |schema| {
-                    return self.getZigTypeFromSchema(schema);
+                if (param.location == .body) {
+                    if (param.schema) |schema| {
+                        try self.appendZigTypeFromSchema(schema);
+                    } else {
+                        try self.buffer.appendSlice(self.allocator, "std.json.Value");
+                    }
+                } else if (param.type) |param_type| {
+                    try self.appendZigTypeFromSchemaType(param_type);
+                } else {
+                    try self.buffer.appendSlice(self.allocator, "[]const u8");
                 }
             }
         }
 
-        return "void";
+        try self.buffer.appendSlice(self.allocator, ") !void {\n");
     }
 
     fn generateFunctionBody(self: *UnifiedApiGenerator, method: []const u8, path: []const u8, operation: Operation) !void {
         if (operation.parameters) |parameters| {
-            if (parameters.len > 0) {
-                for (parameters) |parameter| {
-                    if (parameter.location != .path and parameter.location != .body) {
-                        try self.buffer.appendSlice(self.allocator, "    _ = ");
-                        try self.buffer.appendSlice(self.allocator, parameter.name);
-                        try self.buffer.appendSlice(self.allocator, ";\n");
-                    }
+            for (parameters) |parameter| {
+                if (parameter.location != .path and parameter.location != .body) {
+                    try self.buffer.appendSlice(self.allocator, "    _ = ");
+                    try self.appendIdentifier(parameter.name);
+                    try self.buffer.appendSlice(self.allocator, ";\n");
                 }
             }
         }
@@ -168,16 +190,13 @@ pub const UnifiedApiGenerator = struct {
         try self.buffer.appendSlice(self.allocator, "    const headers = &[_]std.http.Header{\n");
         try self.buffer.appendSlice(self.allocator, "        .{ .name = \"Content-Type\", .value = \"application/json\" },\n");
         try self.buffer.appendSlice(self.allocator, "        .{ .name = \"Accept\", .value = \"application/json\" },\n");
-        try self.buffer.appendSlice(self.allocator, "    };\n");
-        try self.buffer.appendSlice(self.allocator, "\n");
+        try self.buffer.appendSlice(self.allocator, "    };\n\n");
 
         if (operation.parameters) |parameters| {
             var new_path = path;
             var allocated_paths = std.ArrayList([]u8).empty;
             defer {
-                for (allocated_paths.items) |allocated_path| {
-                    self.allocator.free(allocated_path);
-                }
+                for (allocated_paths.items) |allocated_path| self.allocator.free(allocated_path);
                 allocated_paths.deinit(self.allocator);
             }
 
@@ -198,20 +217,16 @@ pub const UnifiedApiGenerator = struct {
             }
 
             try self.buffer.appendSlice(self.allocator, "    const uri_str = try std.fmt.allocPrint(allocator, \"");
-            if (self.args.base_url) |base_url| {
-                try self.buffer.appendSlice(self.allocator, base_url);
-            }
+            if (self.args.base_url) |base_url| try self.buffer.appendSlice(self.allocator, base_url);
             try self.buffer.appendSlice(self.allocator, new_path);
             try self.buffer.appendSlice(self.allocator, "\", .{");
 
-            var pos: i32 = 0;
+            var first_path_param = true;
             for (parameters) |parameter| {
                 if (parameter.location != .path) continue;
-                const param = parameter.name;
-                try self.buffer.appendSlice(self.allocator, param);
-                pos += 1;
-                if (pos < parameters.len)
-                    try self.buffer.appendSlice(self.allocator, ", ");
+                if (!first_path_param) try self.buffer.appendSlice(self.allocator, ", ");
+                first_path_param = false;
+                try self.appendIdentifier(parameter.name);
             }
             try self.buffer.appendSlice(self.allocator, "});\n");
 
@@ -219,9 +234,7 @@ pub const UnifiedApiGenerator = struct {
             try self.buffer.appendSlice(self.allocator, "    const uri = try std.Uri.parse(uri_str);\n");
         } else {
             try self.buffer.appendSlice(self.allocator, "    const uri = try std.Uri.parse(\"");
-            if (self.args.base_url) |base_url| {
-                try self.buffer.appendSlice(self.allocator, base_url);
-            }
+            if (self.args.base_url) |base_url| try self.buffer.appendSlice(self.allocator, base_url);
             try self.buffer.appendSlice(self.allocator, path);
             try self.buffer.appendSlice(self.allocator, "\");\n");
         }
@@ -232,6 +245,7 @@ pub const UnifiedApiGenerator = struct {
         try self.buffer.appendSlice(self.allocator, "    defer req.deinit();\n\n");
 
         if (std.mem.eql(u8, method, "POST") or std.mem.eql(u8, method, "PUT") or std.mem.eql(u8, method, "PATCH")) {
+            var sent_body = false;
             if (operation.parameters) |params| {
                 for (params) |param| {
                     if (param.location == .body) {
@@ -240,58 +254,42 @@ pub const UnifiedApiGenerator = struct {
                         try self.buffer.appendSlice(self.allocator, "    try std.json.Stringify.value(requestBody, .{}, &str.writer);\n");
                         try self.buffer.appendSlice(self.allocator, "    const payload = str.written();\n\n");
                         try self.buffer.appendSlice(self.allocator, "    req.transfer_encoding = .{ .content_length = payload.len };\n");
-                        try self.buffer.appendSlice(self.allocator, "    try req.sendBodyComplete(payload);\n\n");
+                        try self.buffer.appendSlice(self.allocator, "    try req.sendBodyComplete(payload);\n");
+                        sent_body = true;
                         break;
                     }
                 }
             }
+            if (!sent_body) try self.buffer.appendSlice(self.allocator, "    try req.sendBodiless();\n");
         } else {
             try self.buffer.appendSlice(self.allocator, "    try req.sendBodiless();\n");
-        }
-
-        const return_type = self.getReturnType(method, operation);
-        if (!std.mem.eql(u8, return_type, "void")) {
-            try self.buffer.appendSlice(self.allocator, "\n");
-            try self.buffer.appendSlice(self.allocator, "    var response = try req.receiveHead(&.{});\n");
-            try self.buffer.appendSlice(self.allocator, "    if (response.head.status != .ok) {\n");
-            try self.buffer.appendSlice(self.allocator, "        return error.ResponseError;\n");
-            try self.buffer.appendSlice(self.allocator, "    }\n\n");
-            try self.buffer.appendSlice(self.allocator, "    var reader_buffer: [100]u8 = undefined;\n");
-            try self.buffer.appendSlice(self.allocator, "    const body_reader = response.reader(&reader_buffer);\n");
-            try self.buffer.appendSlice(self.allocator, "    const body = try body_reader.readAlloc(allocator, response.head.content_length orelse 1024 * 1024 * 4);\n");
-            try self.buffer.appendSlice(self.allocator, "    defer allocator.free(body);\n\n");
-            try self.buffer.appendSlice(self.allocator, "    const parsed = try std.json.parseFromSlice(");
-            try self.buffer.appendSlice(self.allocator, return_type);
-            try self.buffer.appendSlice(self.allocator, ", allocator, body, .{});\n");
-            try self.buffer.appendSlice(self.allocator, "    defer parsed.deinit();\n\n");
-            try self.buffer.appendSlice(self.allocator, "    return parsed.value;\n");
         }
 
         try self.buffer.appendSlice(self.allocator, "}\n\n");
     }
 
-    fn getZigTypeFromSchema(self: *UnifiedApiGenerator, schema: Schema) []const u8 {
+    fn appendZigTypeFromSchema(self: *UnifiedApiGenerator, schema: Schema) !void {
         if (schema.ref) |ref| {
             if (std.mem.lastIndexOf(u8, ref, "/")) |last_slash| {
-                return ref[last_slash + 1 ..];
+                try self.appendIdentifier(ref[last_slash + 1 ..]);
+                return;
             }
         }
         if (schema.type) |schema_type| {
-            return self.getZigTypeFromSchemaType(schema_type);
+            try self.appendZigTypeFromSchemaType(schema_type);
+            return;
         }
-        return "[]const u8"; // default fallback
+        try self.buffer.appendSlice(self.allocator, "std.json.Value");
     }
 
-    fn getZigTypeFromSchemaType(self: *UnifiedApiGenerator, schema_type: SchemaType) []const u8 {
-        _ = self;
-        return switch (schema_type) {
+    fn appendZigTypeFromSchemaType(self: *UnifiedApiGenerator, schema_type: SchemaType) !void {
+        try self.buffer.appendSlice(self.allocator, switch (schema_type) {
             .string => "[]const u8",
             .integer => "i64",
             .number => "f64",
             .boolean => "bool",
-            .array => "[]const u8", // Simplified for now
-            .object => "std.json.Value",
-            .reference => "[]const u8",
-        };
+            .array => "[]const std.json.Value",
+            .object, .reference => "std.json.Value",
+        });
     }
 };

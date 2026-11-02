@@ -472,6 +472,29 @@ pub fn build(b: *std.Build) void {
     const run_generated_tests = b.addRunArtifact(generated_tests);
     test_step.dependOn(&run_generated_tests.step);
 
+    // Exercise both flat arguments and optional-parameter structs over HTTP.
+    for ([_]bool{ false, true }) |options_mode| {
+        const provider_fixture = b.addRunArtifact(exe);
+        provider_fixture.addArg("generate");
+        if (options_mode) provider_fixture.addArg("--parameters-as-struct");
+        provider_fixture.addArg("-i");
+        provider_fixture.addFileArg(b.path("openapi/v3.1/regression-provider-schemas.json"));
+        provider_fixture.addArg("-o");
+        const provider_models = provider_fixture.addOutputFileArg(if (options_mode) "provider_options.zig" else "provider_models.zig");
+        const provider_tests_module = b.createModule(.{
+            .root_source_file = b.path("src/tests/compile_provider_schema_fixture.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        provider_tests_module.addImport("provider_fixture", b.createModule(.{
+            .root_source_file = provider_models,
+            .target = target,
+            .optimize = optimize,
+        }));
+        const provider_tests = b.addTest(.{ .root_module = provider_tests_module });
+        test_step.dependOn(&b.addRunArtifact(provider_tests).step);
+    }
+
     const multi_generated_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("generated/compile_multi_generated.zig"),

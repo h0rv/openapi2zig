@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.1 (h0rv fork)
+
+This release requires Zig 0.17.0 and includes upstream 0.6.0.
+
+- Exposes the generator executable through a named build path.
+- Handles provider specs with missing version metadata without inventing a version.
+- Avoids collisions between component types and generated helper names.
+- Preserves arbitrary keys in open JSON Schema objects.
+- Detects streaming request modes and forwards their path, query, and header parameters.
+- Adds short resource methods for operation IDs such as `messages_post` and `models_list`.
+- Disables HTTP redirects so credentials are not forwarded to another endpoint.
+- Adds provider schema and loopback HTTP regression tests.
+
+Generated streaming signatures now include declared non-body parameters. Use `--parameters-as-struct` for named options. Multipart and form encoding remain unsupported. Non-streaming response buffering has no size bound.
+
 ## [Unreleased](https://github.com/christianhelle/openapi2zig/tree/HEAD)
 
 [Full Changelog](https://github.com/christianhelle/openapi2zig/compare/v0.5.7...HEAD)

@@ -404,6 +404,20 @@ pub fn main(init: std.process.Init) !void {
 
 #### Generate clients from a build step
 
+To invoke the CLI from a dependency, use its named executable path. The executable and static library both have the artifact name `openapi2zig`, so `artifact("openapi2zig")` is ambiguous. Target the host when running the generator during a build.
+
+```zig
+const dep = b.dependency("openapi2zig", .{
+    .target = b.graph.host,
+    .optimize = .ReleaseSafe,
+});
+const generate = b.addRunFile(dep.namedLazyPath("openapi2zig-cli"));
+generate.addArgs(&.{ "generate", "-i" });
+generate.addFileArg(b.path("openapi/api.json"));
+generate.addArg("-o");
+const generated = generate.addOutputFileArg("api.zig");
+```
+
 For generated clients that are committed to your repository, keep regeneration opt-in so ordinary builds and tests do not fetch or run the generator. This pattern mirrors `puny`'s [`regenerate-providers` build step](https://github.com/christianhelle/puny/blob/main/build.zig) and [generation tool](https://github.com/christianhelle/puny/blob/main/tools/generate_providers.zig).
 
 First, mark the dependency as lazy in `build.zig.zon`. Omit `.lazy = true` when application source imports `openapi2zig` and therefore needs it on every build.

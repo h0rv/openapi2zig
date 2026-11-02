@@ -36,6 +36,7 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_root_module,
     });
     exe.root_module.addImport("openapi2zig", openapi2zig_mod);
+    b.addNamedLazyPath("openapi2zig-cli", exe.getEmittedBin());
     b.installArtifact(exe);
 
     // Static library for linking
